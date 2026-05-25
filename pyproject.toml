@@ -1,0 +1,15 @@
+[project]
+name = "marimo-testcase"
+version = "0.1.0"
+description = "Small marimo notebook project for trying reactive notebooks in Cursor."
+requires-python = ">=3.11"
+dependencies = [
+    "altair>=5.5.0",
+    "marimo>=0.14.0",
+    "numpy>=2.0.0",
+    "openpyxl>=3.1.5",
+    "pandas>=2.2.0",
+]
+
+[tool.uv]
+package = false

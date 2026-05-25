@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+# marimo/runtime state
+__marimo__/
+
+# generated local exports
+*.xlsx
+*.zip
+
+# local agent skill install; reinstall with npx if needed
+.agents/
+skills-lock.json
+CLAUDE.md
