@@ -15,5 +15,6 @@ uv run marimo export html-wasm customer_churn_demo.py \
   --force
 
 cp dist/kundeanalyse_marimo_app.html dist/index.html
+rm -f dist/CLAUDE.md dist/AGENTS.md dist/agents.md
 
 echo "Built GitHub Pages app in: $ROOT/dist"
