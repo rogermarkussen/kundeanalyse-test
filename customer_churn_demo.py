@@ -27,7 +27,7 @@ def _():
 @app.cell
 def _(mo):
     mo.md("""
-    # Reaktiv kundeanalyse
+    # Reaktiv kundeanalyse 2
 
     Endre kontrollene under og se hvordan data, KPI-er og grafen oppdateres automatisk.
     Testcasen bruker syntetiske kundedata, så den kan kjøres helt lokalt.
