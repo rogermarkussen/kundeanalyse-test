@@ -784,6 +784,180 @@ uv run marimo edit customer_churn_demo.py</code></pre>
     </section>
 
     <section class="section">
+      <h2>Azure Static Web Apps med Parquet-snapshots</h2>
+      <p class="section-intro">
+        GitHub Pages-sporet over fungerer fint for åpne, statiske demoer. Hvis vi
+        allerede har Azure Static Web Apps tilgjengelig, kan vi bruke samme
+        marimo/WASM-prinsipp der: appen er statisk, mens Postgres bare brukes i
+        build-steget for å lage Parquet-snapshotet.
+      </p>
+
+      <div class="diagram">
+        <div class="flow">
+          <div class="flow-box red">
+            <strong>Azure Postgres</strong>
+            <span>Database/view med read-only tilgang for snapshot-jobben.</span>
+          </div>
+          <div class="flow-box amber">
+            <strong>GitHub Actions</strong>
+            <span>Henter secret og bygger datafilen ved push eller schedule.</span>
+          </div>
+          <div class="flow-box green">
+            <strong>Polars</strong>
+            <span>Leser Postgres og skriver komprimert Parquet.</span>
+          </div>
+          <div class="flow-box blue">
+            <strong>Azure SWA</strong>
+            <span>Publiserer marimo HTML/WASM-assets og <code>data/*.parquet</code>.</span>
+          </div>
+          <div class="flow-box green">
+            <strong>Browser</strong>
+            <span>DuckDB-WASM kjører SQL lokalt mot snapshotet.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cards">
+        <article class="card green">
+          <span class="tag">Hvorfor SWA</span>
+          <h3>God Azure-integrasjon</h3>
+          <p>
+            SWA passer godt hvis appen skal leve i Azure-landskapet vårt, bruke egne
+            domener, tilgangsstyring eller senere få et server-side API.
+          </p>
+        </article>
+        <article class="card amber">
+          <span class="tag">Hvorfor snapshot</span>
+          <h3>Ingen live DB-avhengighet</h3>
+          <p>
+            Sluttbrukeren belaster ikke Postgres. Appen laster bare statiske filer
+            fra SWA, og all filtrering/spørring skjer i browseren.
+          </p>
+        </article>
+        <article class="card blue">
+          <span class="tag">Hvorfor DuckDB</span>
+          <h3>Raske lokale queries</h3>
+          <p>
+            Parquet holder data kompakt, og DuckDB-WASM gir SQL over snapshotet uten
+            backend-kall for hvert filter eller dashboardvalg.
+          </p>
+        </article>
+      </div>
+
+      <div class="note">
+        <strong>Hovedregel:</strong> selv på Azure SWA bør marimo-appen ikke koble
+        direkte til Postgres fra nettleseren. Connection string ligger i GitHub/Azure
+        secrets og brukes bare av build-jobben.
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>SWA workflow for snapshot-modellen</h2>
+      <p class="section-intro">
+        SWA-deployen ligner GitHub Pages, men bruker Azure sin deploy-action og en
+        deployment token. Først bygger vi data til <code>dist/data</code>, deretter
+        eksporterer vi marimo-appen til <code>dist/index.html</code>, og til slutt
+        laster vi hele <code>dist/</code> opp til SWA.
+      </p>
+
+      <div class="code-block">
+        <div class="code-title">.github/workflows/deploy-azure-swa.yml</div>
+        <pre><code>name: Deploy marimo app to Azure Static Web Apps
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "15 5 * * *"  # daglig snapshot, juster ved behov
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Build Postgres snapshot
+        env:
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+        run: |
+          rm -rf dist
+          mkdir -p dist/data
+          uv run --with polars --with connectorx --with pyarrow \
+            python scripts/export_snapshot.py
+
+      - name: Export marimo WASM app
+        run: |
+          uv run marimo export html-wasm customer_churn_demo.py \
+            -o dist/index.html \
+            --mode run \
+            --no-show-code \
+            --force
+          rm -f dist/CLAUDE.md dist/AGENTS.md dist/agents.md
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: dist
+          output_location: ""
+          skip_app_build: true</code></pre>
+      </div>
+
+      <div class="two-col">
+        <div class="note">
+          <strong>Secrets:</strong> <code>POSTGRES_URL</code> brukes av snapshot-scriptet.
+          <code>AZURE_STATIC_WEB_APPS_API_TOKEN</code> hentes fra Azure SWA-ressursen og
+          brukes bare av deploy-steget.
+        </div>
+        <div class="note">
+          <strong>Oppdatering:</strong> data oppdateres ved push, manuell
+          <code>workflow_dispatch</code>, eller schedule. Bruk schedule hvis appen skal ha
+          faste dagsferske snapshots uten kodeendringer.
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>GitHub Pages vs Azure SWA</h2>
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th>Valg</th>
+            <th>Bruk når</th>
+            <th>Datamønster</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>GitHub Pages</td>
+            <td>Demoer, åpne interne prototyper, enkel publisering fra repo.</td>
+            <td>Samme Parquet-snapshot. Ingen secrets i browser.</td>
+          </tr>
+          <tr>
+            <td>Azure Static Web Apps</td>
+            <td>Azure-nær drift, egne domener, tilgangsstyring, mulig senere API.</td>
+            <td>Samme Parquet-snapshot. Build-jobb henter fra Azure Postgres.</td>
+          </tr>
+          <tr>
+            <td>SWA + live API</td>
+            <td>Når data må være live og brukervalg skal treffe server-side queries.</td>
+            <td>Ikke snapshot. Krever Azure Functions/API og mer drift.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="note">
+        <strong>Anbefaling nå:</strong> bruk Azure SWA med Parquet-snapshot for apper
+        der data kan være oppdatert ved deploy eller på schedule. Det gir lav kompleksitet
+        og god ytelse uten live databaseeksponering.
+      </div>
+    </section>
+
+    <section class="section">
       <h2>Hva vi har validert</h2>
       <table class="matrix">
         <thead>
